@@ -11,6 +11,7 @@ commit that introduced it.
 
 ## Unreleased
 
+- Check the parent fork daily and open one tracking issue per upstream tip with commits missing from this fork's history.
 - Open Waters maintains its own fork with pinned CI actions, Node 24 checks, weekly dependency updates, and verification of the committed action bundle.
 - Resolve primary authors and co-authors through GitHub's account identities, including legacy noreply and verified email addresses. Reject null author entries and commits with more than 100 authors instead of skipping contributors.
 - Preserve email exemptions for linked co-authors while requiring the authenticated human PR opener to sign. Signing exemptions do not bypass the opener authorship guard or its diagnostic output. Authorship follows GitHub's recognized trailers; an unrelated committer identity does not stand in for an unlinked author.

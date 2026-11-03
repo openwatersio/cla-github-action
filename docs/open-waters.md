@@ -25,3 +25,13 @@ Keep signature-only commits out of application build lanes. If two runs try to u
 Confirm the App installation and each token expose only `.cla.json` for writing. Check that existing signature IDs and comment metadata survive, and verify a signature commit reaches `main` with the App's identity. Signing checks must fail visibly when storage rejects a write.
 
 The repository-specific workflow changes require a PR merge before `pull_request_target` and `issue_comment` use them. A workflow PR runs the current default-branch CLA workflow until it merges.
+
+## Upstream updates
+
+The `Check upstream` workflow is scheduled daily at 10:17 UTC and supports manual runs. It verifies that the parent fork is `iainmcgin/cla-github-action` and compares both default branches (currently `master`). Commits already present in our history need no alert; missing upstream commits open an issue with the upstream tip and a comparison link.
+
+GitHub Issues must be enabled. Each upstream tip gets at most one bot-created issue, including closed issues, so closing an alert acknowledges that tip. Later upstream tips get new issues. The workflow uses the ordinary Actions token with Contents read and Issues write permissions; it does not use the signature App or its private key. API errors fail the workflow visibly.
+
+Alerts compare the full upstream history with this fork; cherry-picked or deliberately declined commits can appear again in later comparison ranges. Keep the bot's hidden marker in each issue body to preserve deduplication.
+
+The schedule becomes available after the workflow reaches the default branch. Run `Check upstream` manually after merging and confirm the comparison result in Actions. GitHub [disables public-repository schedules after 60 days without repository activity](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule). If the fork has been idle, check the workflow's state in Actions and re-enable it before relying on scheduled alerts.
