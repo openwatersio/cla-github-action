@@ -3,3 +3,4 @@ __tests__/runner/*
 node_modules
 lib
 .idea
+.worktrees/

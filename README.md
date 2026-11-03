@@ -1,14 +1,15 @@
 > [!NOTE]
-> This is a fork of [contributor-assistant/github-action](https://github.com/contributor-assistant/github-action)
-> (archived upstream 2026-03-23). It is maintained for internal use only and is
-> **not** intended as a general-purpose community successor. No support or issue
-> triage is offered.
+> Open Waters maintains this fork for its own repositories. It follows [iainmcgin/cla-github-action](https://github.com/iainmcgin/cla-github-action), based on the archived [contributor-assistant/github-action](https://github.com/contributor-assistant/github-action). The Apache-2.0 license and upstream Git history are preserved.
 >
-> Divergences from upstream are documented in [CHANGELOG.md](./CHANGELOG.md).
-> Highlights: Node 24 runtime, `@actions/github` v6, TypeScript 6 with full
-> strict mode, comprehensive test harness (in-process fake + subprocess smoke
-> tests + pre-/post-refactor regression diff), pagination fixes, and the
-> `require-opener-as-author` impersonation guard.
+> Consumers must pin a reviewed commit SHA. Open Waters owns dependency updates, security fixes, and the committed JavaScript bundle. Upstream changes are reviewed before adoption. [CHANGELOG.md](./CHANGELOG.md) records the upstream changes.
+
+For the protected-main integration, follow the [Open Waters CLA setup](docs/open-waters.md).
+
+## Development
+
+Use Node 24. Run `npm ci --ignore-scripts`, `npm run lint`, `npm test -- --runInBand`, and `npm run build`. Commit the resulting `dist/` files with source changes. CI rebuilds the action and rejects a bundle that differs from the committed files. The historical regression tests need a full Git checkout.
+
+Dependency update PRs also need a local rebuild and a committed `dist/` update before they can pass CI. This is a manual review step; workflows do not commit code on Dependabot's behalf.
 
 # Handling CLAs and DCOs via GitHub Action
 
@@ -49,7 +50,7 @@ jobs:
       - name: "CLA Assistant"
         if: (github.event.comment.body == 'recheck' || github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA') || github.event_name == 'pull_request_target'
         # Pin to a full 40-character commit SHA, not a tag — see "Pinning by commit SHA" below.
-        uses: iainmcgin/cla-github-action@0d27e5a16278d4adb6b0c4b92f08ad27b0a21dc8 # v3.2.0
+        uses: openwatersio/cla-github-action@0d27e5a16278d4adb6b0c4b92f08ad27b0a21dc8 # upstream v3.2.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # the below token should have repo scope and must be manually added by you in the repository's secret
@@ -60,7 +61,7 @@ jobs:
           path-to-document: 'https://link/to/your/cla-or-dco/document' # e.g. a CLA or a DCO document
           # branch should not be protected
           branch: 'main'
-          allowlist: user1,bot*
+          allowlist: user1,*[bot]
 
          # the followings are the optional inputs - If the optional inputs are not given, then default values will be taken
           #remote-organization-name: enter the remote organization name where the signatures should be stored (Default is storing the signatures in the same repository)
@@ -97,16 +98,16 @@ jobs:
 >
 > ```bash
 > # Latest commit on master:
-> git ls-remote https://github.com/iainmcgin/cla-github-action.git refs/heads/master
+> git ls-remote https://github.com/openwatersio/cla-github-action.git refs/heads/master
 > ```
 >
-> Or browse to the [releases page](https://github.com/iainmcgin/cla-github-action/releases)
-> or [commits page](https://github.com/iainmcgin/cla-github-action/commits/master),
+> Or browse to the [releases page](https://github.com/openwatersio/cla-github-action/releases)
+> or [commits page](https://github.com/openwatersio/cla-github-action/commits/master),
 > pick a commit, and copy the full SHA. After pinning, add the human-readable
 > reference as a trailing comment so future readers know what they're looking at:
 >
 > ```yaml
-> uses: iainmcgin/cla-github-action@0d27e5a16278d4adb6b0c4b92f08ad27b0a21dc8 # v3.2.0
+> uses: openwatersio/cla-github-action@0d27e5a16278d4adb6b0c4b92f08ad27b0a21dc8 # upstream v3.2.0
 > ```
 >
 > Tools like [Dependabot](https://docs.github.com/en/code-security/dependabot/working-with-dependabot/keeping-your-actions-up-to-date-with-dependabot)
@@ -150,7 +151,7 @@ and `remote-repository-name`: `<your repo name>` in your CLA workflow file.
 
 #### 5. Users and bots in allowlist
 
-If a GitHub username is included in the allowlist, they will not be required to sign a CLA. You can make use of this feature If you don't want your colleagues working in the same team/organisation to sign a CLA. And also, since there's no way for bot users (such as Dependabot or Greenkeeper) to sign a CLA, you may want to add them in `allowlist`. You can do so by adding their names in a comma separated string to the `allowlist` input in the CLA  workflow file(in this case `dependabot[bot],greenkeeper[bot]`). You can also use wildcard symbol in case you want to allow all bot users something like `bot*`.
+An allowlisted GitHub username does not need to sign the CLA. Set comma-separated logins such as `dependabot[bot],greenkeeper[bot]`, or use `*[bot]` for bot login suffixes. Wildcards match the whole login, name, or email address: `bot*` matches only values starting with `bot`. Email exemptions apply to commit credits; the authenticated human PR opener must still sign unless their login is exempt. The authorship guard is a separate check from the signing exemption.
 
 ##### Demo for step 5
 
@@ -180,7 +181,7 @@ This PAT should have repo scope and is only required if you have configured to s
 | `path-to-document`     | _required_ |  provide full URL `https://<clafile>` to the document which shall be signed by the contributor(s)  It can be any file e.g. inside the repository or it can be a gist. | https://github.com/cla-assistant/github-action/blob/master/SAPCLA.md |
 | `path-to-signatures`       | _optional_ |  Path to the JSON file where  all the signatures of the contributors will be stored inside the repository. | signatures/version1/cla.json |
 | `branch`   | _optional_ |  Branch in which all the signatures of the contributors will be stored and Default branch is `master`.  | master |
-| `allowlist`   | _optional_ | You can specify users and bots to be [added in allowlist](https://github.com/cla-assistant/github-action#5-users-and-bots-in-allowlist).  | user1,user2,bot* |
+| `allowlist`   | _optional_ | Comma-separated account logins, names, or email addresses. `*` matches within the whole value; `bot*` matches a value starting with `bot`. | user1,user2,*[bot] |
 | `remote-repository-name`   | _optional_ | provide the remote repository name where all the signatures should be stored . | remote repository name |
 | `remote-organization-name`   | _optional_ | provide the remote organization name where all the signatures should be stored. | remote organization name |
 | `create-file-commit-message`   | _optional_ |Commit message when a new CLA file is created. | Creating file for storing CLA Signatures. |
@@ -200,6 +201,8 @@ This PAT should have repo scope and is only required if you have configured to s
 | `opener_not_in_commits` | Set to `'true'` when the Pull Request opener is not recorded as an author or co-author of any commit in the PR. Emitted regardless of whether `require-opener-as-author` caused the check to fail. |
 
 ## Contributors
+
+The following list credits contributors to the upstream projects.
 
 <!-- readme: collaborators,contributors -start -->
 <table>

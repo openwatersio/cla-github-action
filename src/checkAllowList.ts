@@ -12,17 +12,25 @@ function isAllowListed(value: string): boolean {
     const pattern = rawPattern.trim()
     if (pattern.includes('*')) {
       const regex = escapeRegExp(pattern).split('\\*').join('.*')
-      return new RegExp(regex).test(value)
+      return new RegExp(`^${regex}$`).test(value)
     }
     return pattern === value
   })
 }
 
 export function checkAllowList(committers: Committer[]): Committer[] {
-  return committers.filter(
-    committer =>
-      committer &&
-      !isAllowListed(committer.name) &&
-      !(committer.email && isAllowListed(committer.email))
-  )
+  const seenIds = new Set<number>()
+  return committers.filter(committer => {
+    // An exempt alias must not hide a non-exempt email for the same account.
+    if (
+      !committer ||
+      isAllowListed(committer.name) ||
+      (committer.email && isAllowListed(committer.email))
+    )
+      return false
+    if (!committer.id) return true
+    if (seenIds.has(committer.id)) return false
+    seenIds.add(committer.id)
+    return true
+  })
 }

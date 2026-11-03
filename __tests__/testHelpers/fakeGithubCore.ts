@@ -24,6 +24,12 @@ export interface PullRequest {
   state?: 'open' | 'closed'
   commits: Array<{
     author: { login?: string; name?: string; id?: number; email?: string }
+    coAuthors?: Array<{
+      login?: string
+      name?: string
+      id?: number
+      email?: string
+    }>
     message?: string
   }>
 }
@@ -412,6 +418,14 @@ export function createFakeGitHubCore(): FakeGitHubCore {
                   login: c.author.login
                 }
               : null
+          },
+          authors: {
+            nodes: [c.author, ...(c.coAuthors || [])].slice(0, 100).map(a => ({
+              email: a.email || '',
+              name: a.name || a.login || '',
+              user: a.login ? { databaseId: a.id, login: a.login } : null
+            })),
+            pageInfo: { hasNextPage: (c.coAuthors?.length || 0) >= 100 }
           },
           committer: { name: c.author.name || c.author.login || '', user: null }
         }

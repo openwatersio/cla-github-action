@@ -2,7 +2,6 @@ import { octokit } from './octokit'
 import { context } from '@actions/github'
 import { Committer } from './interfaces'
 import { errorMessage } from './shared/errors'
-import { parseCoAuthors } from './shared/coAuthors'
 
 interface GraphQLUser {
   id?: string
@@ -17,9 +16,10 @@ interface GraphQLActor {
   user?: GraphQLUser | null
 }
 interface GraphQLCommit {
-  message?: string
-  author?: GraphQLActor
-  committer?: GraphQLActor
+  authors: {
+    nodes: Array<GraphQLActor | null>
+    pageInfo: { hasNextPage: boolean }
+  }
 }
 interface GraphQLEdge {
   node: { commit: GraphQLCommit }
@@ -47,15 +47,13 @@ query($owner:String! $name:String! $number:Int! $cursor:String){
                 edges {
                     node {
                         commit {
-                            message
-                            author {
-                                email
-                                name
-                                user { id databaseId login }
-                            }
-                            committer {
-                                name
-                                user { id databaseId login }
+                            authors(first: 100) {
+                                nodes {
+                                    email
+                                    name
+                                    user { databaseId login }
+                                }
+                                pageInfo { hasNextPage }
                             }
                         }
                     }
@@ -94,37 +92,23 @@ export default async function getCommitters(): Promise<Committer[]> {
       const page = response.repository.pullRequest.commits
       for (const edge of page.edges) {
         const commit = edge.node.commit
-        const linkedUser = commit.author?.user || commit.committer?.user
-        const rawActor = commit.author || commit.committer || {}
-        const isLinked = Boolean(linkedUser?.databaseId)
-        addCommitter({
-          name: linkedUser?.login || rawActor.name || rawActor.email || '',
-          id: linkedUser?.databaseId || 0,
-          pullRequestNo: context.issue.number,
-          ...(isLinked ? {} : { email: rawActor.email })
-        })
-
-        // Co-authored-by: trailers on the commit message count toward the
-        // committer set. If the trailer email is a GitHub noreply form
-        // (<id>+<login>@users.noreply.github.com or
-        // <login>@users.noreply.github.com), extract the login + numeric id
-        // directly. Otherwise surface as an unknown committer with email so
-        // the unlinked-email block guides the contributor.
-        for (const coAuthor of parseCoAuthors(commit.message || '')) {
-          if (coAuthor.noreplyId && coAuthor.noreplyLogin) {
-            addCommitter({
-              name: coAuthor.noreplyLogin,
-              id: coAuthor.noreplyId,
-              pullRequestNo: context.issue.number
-            })
-          } else {
-            addCommitter({
-              name: coAuthor.name,
-              id: 0,
-              pullRequestNo: context.issue.number,
-              email: coAuthor.email
-            })
-          }
+        // shortcut: fail closed above 100 authors per commit; paginate if larger commits are needed.
+        if (commit.authors.pageInfo.hasNextPage) {
+          throw new Error(
+            'Commit has more than 100 authors; split it before CLA validation'
+          )
+        }
+        // GitHub resolves account IDs for primary authors and co-authors, including legacy and verified emails.
+        for (const actor of commit.authors.nodes) {
+          if (!actor)
+            throw new Error('GitHub returned an unreadable commit author')
+          const user = actor.user
+          addCommitter({
+            name: user?.login || actor.name || actor.email || '',
+            id: user?.databaseId || 0,
+            pullRequestNo: context.issue.number,
+            email: actor.email
+          })
         }
       }
       cursor = page.pageInfo.endCursor
