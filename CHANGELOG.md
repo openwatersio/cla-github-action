@@ -11,7 +11,7 @@ commit that introduced it.
 
 ## Unreleased
 
-_Nothing yet._
+- Open Waters maintains its own fork with pinned CI actions, Node 24 checks, weekly dependency updates, and verification of the committed action bundle.
 
 ## v3.2.0 — 2026-06-17
 

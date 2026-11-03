@@ -1,17 +1,21 @@
 {
-  "name": "github-action",
+  "name": "cla-github-action",
   "version": "0.0.1",
   "description": "GitHub Action for storing CLA signatures",
   "type": "commonjs",
-  "main": "lib/main.js",
+  "main": "dist/index.js",
   "private": true,
   "files": [
     "dist/",
     "action.yml"
   ],
+  "knip": {
+    "ignore": ["dist/**"],
+    "entry": ["src/main.ts"]
+  },
   "scripts": {
     "test": "jest",
-    "build": "tsc && ncc build",
+    "build": "tsc && ncc build lib/main.js",
     "buildAndAdd": "npm run build && git add .",
     "format": "prettier --write \"src/**/*.ts\" \"__tests__/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"__tests__/**/*.ts\"",
@@ -22,7 +26,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/cla-assistant/github-action.git"
+    "url": "git+https://github.com/openwatersio/cla-github-action.git"
   },
   "keywords": [
     "actions",
@@ -50,7 +54,7 @@
   "author": "ibakshay",
   "license": "Apache-2.0",
   "bugs": {
-    "url": "https://github.com/cla-assistant/github-action/issues"
+    "url": "https://github.com/openwatersio/cla-github-action/issues"
   },
-  "homepage": "https://github.com/cla-assistant/github-action#readme"
+  "homepage": "https://github.com/openwatersio/cla-github-action#readme"
 }

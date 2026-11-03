@@ -1,14 +1,15 @@
 > [!NOTE]
-> This is a fork of [contributor-assistant/github-action](https://github.com/contributor-assistant/github-action)
-> (archived upstream 2026-03-23). It is maintained for internal use only and is
-> **not** intended as a general-purpose community successor. No support or issue
-> triage is offered.
+> Open Waters maintains this fork for its own repositories. It follows [iainmcgin/cla-github-action](https://github.com/iainmcgin/cla-github-action), based on the archived [contributor-assistant/github-action](https://github.com/contributor-assistant/github-action). The Apache-2.0 license and upstream Git history are preserved.
 >
-> Divergences from upstream are documented in [CHANGELOG.md](./CHANGELOG.md).
-> Highlights: Node 24 runtime, `@actions/github` v6, TypeScript 6 with full
-> strict mode, comprehensive test harness (in-process fake + subprocess smoke
-> tests + pre-/post-refactor regression diff), pagination fixes, and the
-> `require-opener-as-author` impersonation guard.
+> Consumers must pin a reviewed commit SHA. Open Waters owns dependency updates, security fixes, and the committed JavaScript bundle. Upstream changes are reviewed before adoption. [CHANGELOG.md](./CHANGELOG.md) records the upstream changes.
+
+For the protected-main integration, follow the [Open Waters CLA setup](docs/open-waters.md).
+
+## Development
+
+Use Node 24. Run `npm ci --ignore-scripts`, `npm run lint`, `npm test -- --runInBand`, and `npm run build`. Commit the resulting `dist/` files with source changes. CI rebuilds the action and rejects a bundle that differs from the committed files. The historical regression tests need a full Git checkout.
+
+Dependency update PRs also need a local rebuild and a committed `dist/` update before they can pass CI. This is a manual review step; workflows do not commit code on Dependabot's behalf.
 
 # Handling CLAs and DCOs via GitHub Action
 
@@ -49,7 +50,7 @@ jobs:
       - name: "CLA Assistant"
         if: (github.event.comment.body == 'recheck' || github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA') || github.event_name == 'pull_request_target'
         # Pin to a full 40-character commit SHA, not a tag — see "Pinning by commit SHA" below.
-        uses: iainmcgin/cla-github-action@0d27e5a16278d4adb6b0c4b92f08ad27b0a21dc8 # v3.2.0
+        uses: openwatersio/cla-github-action@0d27e5a16278d4adb6b0c4b92f08ad27b0a21dc8 # upstream v3.2.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # the below token should have repo scope and must be manually added by you in the repository's secret
@@ -97,16 +98,16 @@ jobs:
 >
 > ```bash
 > # Latest commit on master:
-> git ls-remote https://github.com/iainmcgin/cla-github-action.git refs/heads/master
+> git ls-remote https://github.com/openwatersio/cla-github-action.git refs/heads/master
 > ```
 >
-> Or browse to the [releases page](https://github.com/iainmcgin/cla-github-action/releases)
-> or [commits page](https://github.com/iainmcgin/cla-github-action/commits/master),
+> Or browse to the [releases page](https://github.com/openwatersio/cla-github-action/releases)
+> or [commits page](https://github.com/openwatersio/cla-github-action/commits/master),
 > pick a commit, and copy the full SHA. After pinning, add the human-readable
 > reference as a trailing comment so future readers know what they're looking at:
 >
 > ```yaml
-> uses: iainmcgin/cla-github-action@0d27e5a16278d4adb6b0c4b92f08ad27b0a21dc8 # v3.2.0
+> uses: openwatersio/cla-github-action@0d27e5a16278d4adb6b0c4b92f08ad27b0a21dc8 # upstream v3.2.0
 > ```
 >
 > Tools like [Dependabot](https://docs.github.com/en/code-security/dependabot/working-with-dependabot/keeping-your-actions-up-to-date-with-dependabot)
@@ -200,6 +201,8 @@ This PAT should have repo scope and is only required if you have configured to s
 | `opener_not_in_commits` | Set to `'true'` when the Pull Request opener is not recorded as an author or co-author of any commit in the PR. Emitted regardless of whether `require-opener-as-author` caused the check to fail. |
 
 ## Contributors
+
+The following list credits contributors to the upstream projects.
 
 <!-- readme: collaborators,contributors -start -->
 <table>
