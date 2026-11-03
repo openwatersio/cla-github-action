@@ -24,8 +24,9 @@ export async function setupClaCheck() {
 
   const commitAuthors = await getCommitters()
   const openerMismatch = detectOpenerMismatch(commitAuthors)
-  let committers = includePullRequestOpener(commitAuthors)
-  committers = checkAllowList(committers)
+  let committers = checkAllowList(commitAuthors)
+  // An exempt credit email must not exempt the authenticated PR opener.
+  committers = checkAllowList(includePullRequestOpener(committers))
 
   const { claFileContent, sha } = (await getCLAFileContentandSHA(
     committers,

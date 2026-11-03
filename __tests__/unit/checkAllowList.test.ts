@@ -9,6 +9,56 @@ function committer(name: string, email?: string): Committer {
 describe('checkAllowList', () => {
   afterEach(resetEnv)
 
+  it('does not exempt human identities through a wildcard substring', () => {
+    setInput('allowlist', 'bot*,*[bot]')
+    expect(
+      checkAllowList([
+        { name: 'robotdev', id: 1001 },
+        { name: 'jane', id: 2002, email: 'x[bot]@evil.example' }
+      ]).map(item => item.id)
+    ).toEqual([1001, 2002])
+  })
+
+  it('requires one signature per account after applying email exemptions', () => {
+    setInput('allowlist', '')
+    expect(
+      checkAllowList([
+        { name: 'alice', id: 1001, email: 'alice@work.example' },
+        {
+          name: 'alice',
+          id: 1001,
+          email: '1001+alice@users.noreply.github.com'
+        }
+      ]).map(item => item.id)
+    ).toEqual([1001])
+  })
+
+  it.each([false, true])(
+    'keeps a non-exempt identity even when another email for the account is exempt: reversed=%s',
+    reverse => {
+      setInput('allowlist', 'robot@example.com')
+      const records = [
+        { name: 'alice', id: 1001, email: 'robot@example.com' },
+        { name: 'alice', id: 1001, email: 'alice@work.example' }
+      ]
+      expect(
+        checkAllowList(reverse ? records.reverse() : records).map(
+          item => item.email
+        )
+      ).toEqual(['alice@work.example'])
+    }
+  )
+
+  it('does not merge different unlinked authors under ID zero', () => {
+    setInput('allowlist', '')
+    expect(
+      checkAllowList([
+        committer('Alice', 'alice@example.com'),
+        committer('Bob', 'bob@example.com')
+      ]).map(item => item.name)
+    ).toEqual(['Alice', 'Bob'])
+  })
+
   it('filters out committers whose login matches an exact allow-list entry', () => {
     setInput('allowlist', 'alice,bob')
     const result = checkAllowList([committer('alice'), committer('carol')])

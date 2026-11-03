@@ -31872,15 +31872,26 @@ function isAllowListed(value) {
         const pattern = rawPattern.trim();
         if (pattern.includes('*')) {
             const regex = escapeRegExp(pattern).split('\\*').join('.*');
-            return new RegExp(regex).test(value);
+            return new RegExp(`^${regex}$`).test(value);
         }
         return pattern === value;
     });
 }
 function checkAllowList(committers) {
-    return committers.filter(committer => committer &&
-        !isAllowListed(committer.name) &&
-        !(committer.email && isAllowListed(committer.email)));
+    const seenIds = new Set();
+    return committers.filter(committer => {
+        // An exempt alias must not hide a non-exempt email for the same account.
+        if (!committer ||
+            isAllowListed(committer.name) ||
+            (committer.email && isAllowListed(committer.email)))
+            return false;
+        if (!committer.id)
+            return true;
+        if (seenIds.has(committer.id))
+            return false;
+        seenIds.add(committer.id);
+        return true;
+    });
 }
 
 
@@ -31905,7 +31916,6 @@ exports["default"] = getCommitters;
 const octokit_1 = __nccwpck_require__(3848);
 const github_1 = __nccwpck_require__(3228);
 const errors_1 = __nccwpck_require__(7848);
-const coAuthors_1 = __nccwpck_require__(1393);
 const GITHUB_ACTIONS_BOT_ID = 41898282;
 const COMMITS_QUERY = `
 query($owner:String! $name:String! $number:Int! $cursor:String){
@@ -31916,15 +31926,13 @@ query($owner:String! $name:String! $number:Int! $cursor:String){
                 edges {
                     node {
                         commit {
-                            message
-                            author {
-                                email
-                                name
-                                user { id databaseId login }
-                            }
-                            committer {
-                                name
-                                user { id databaseId login }
+                            authors(first: 100) {
+                                nodes {
+                                    email
+                                    name
+                                    user { databaseId login }
+                                }
+                                pageInfo { hasNextPage }
                             }
                         }
                     }
@@ -31937,7 +31945,6 @@ query($owner:String! $name:String! $number:Int! $cursor:String){
 }`;
 function getCommitters() {
     return __awaiter(this, void 0, void 0, function* () {
-        var _a, _b;
         try {
             const seenKeys = new Set();
             const committers = [];
@@ -31961,32 +31968,21 @@ function getCommitters() {
                 const page = response.repository.pullRequest.commits;
                 for (const edge of page.edges) {
                     const commit = edge.node.commit;
-                    const linkedUser = ((_a = commit.author) === null || _a === void 0 ? void 0 : _a.user) || ((_b = commit.committer) === null || _b === void 0 ? void 0 : _b.user);
-                    const rawActor = commit.author || commit.committer || {};
-                    const isLinked = Boolean(linkedUser === null || linkedUser === void 0 ? void 0 : linkedUser.databaseId);
-                    addCommitter(Object.assign({ name: (linkedUser === null || linkedUser === void 0 ? void 0 : linkedUser.login) || rawActor.name || rawActor.email || '', id: (linkedUser === null || linkedUser === void 0 ? void 0 : linkedUser.databaseId) || 0, pullRequestNo: github_1.context.issue.number }, (isLinked ? {} : { email: rawActor.email })));
-                    // Co-authored-by: trailers on the commit message count toward the
-                    // committer set. If the trailer email is a GitHub noreply form
-                    // (<id>+<login>@users.noreply.github.com or
-                    // <login>@users.noreply.github.com), extract the login + numeric id
-                    // directly. Otherwise surface as an unknown committer with email so
-                    // the unlinked-email block guides the contributor.
-                    for (const coAuthor of (0, coAuthors_1.parseCoAuthors)(commit.message || '')) {
-                        if (coAuthor.noreplyId && coAuthor.noreplyLogin) {
-                            addCommitter({
-                                name: coAuthor.noreplyLogin,
-                                id: coAuthor.noreplyId,
-                                pullRequestNo: github_1.context.issue.number
-                            });
-                        }
-                        else {
-                            addCommitter({
-                                name: coAuthor.name,
-                                id: 0,
-                                pullRequestNo: github_1.context.issue.number,
-                                email: coAuthor.email
-                            });
-                        }
+                    // shortcut: fail closed above 100 authors per commit; paginate if larger commits are needed.
+                    if (commit.authors.pageInfo.hasNextPage) {
+                        throw new Error('Commit has more than 100 authors; split it before CLA validation');
+                    }
+                    // GitHub resolves account IDs for primary authors and co-authors, including legacy and verified emails.
+                    for (const actor of commit.authors.nodes) {
+                        if (!actor)
+                            throw new Error('GitHub returned an unreadable commit author');
+                        const user = actor.user;
+                        addCommitter({
+                            name: (user === null || user === void 0 ? void 0 : user.login) || actor.name || actor.email || '',
+                            id: (user === null || user === void 0 ? void 0 : user.databaseId) || 0,
+                            pullRequestNo: github_1.context.issue.number,
+                            email: actor.email
+                        });
                     }
                 }
                 cursor = page.pageInfo.endCursor;
@@ -33068,8 +33064,9 @@ function setupClaCheck() {
         let committerMap = getInitialCommittersMap();
         const commitAuthors = yield (0, graphql_1.default)();
         const openerMismatch = detectOpenerMismatch(commitAuthors);
-        let committers = includePullRequestOpener(commitAuthors);
-        committers = (0, checkAllowList_1.checkAllowList)(committers);
+        let committers = (0, checkAllowList_1.checkAllowList)(commitAuthors);
+        // An exempt credit email must not exempt the authenticated PR opener.
+        committers = (0, checkAllowList_1.checkAllowList)(includePullRequestOpener(committers));
         const { claFileContent, sha } = (yield getCLAFileContentandSHA(committers, committerMap));
         committerMap = prepareCommiterMap(committers, claFileContent);
         if (openerMismatch) {
@@ -33212,72 +33209,6 @@ function readOpener() {
     if (!(opener === null || opener === void 0 ? void 0 : opener.id) || !opener.login)
         return undefined;
     return { id: opener.id, login: opener.login };
-}
-
-
-/***/ }),
-
-/***/ 1393:
-/***/ ((__unused_webpack_module, exports) => {
-
-"use strict";
-
-/**
- * Parse Co-authored-by trailers from a commit message.
- *
- * A trailer looks like:
- *   Co-authored-by: Alice Example <alice@example.com>
- *
- * GitHub recognises this when rendering the "Co-authored by" avatars on a
- * commit. It is conventionally placed as a footer trailer (one per line,
- * after a blank line separating the body from the trailer block) but in
- * practice we accept it anywhere on a line.
- */
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.parseCoAuthors = parseCoAuthors;
-/**
- * Matches a single trailer. Case-insensitive on the 'co-authored-by' prefix
- * because git is forgiving about it. The name can contain spaces; the email
- * must be inside angle brackets and contain exactly one '@'.
- */
-const TRAILER_RE = /^\s*co-authored-by:\s*(.+?)\s+<([^<>\s]+@[^<>\s]+)>\s*$/i;
-/**
- * Extract a GitHub login (and optional numeric id) from an
- * @users.noreply.github.com email. Two shapes are supported:
- *   <id>+<login>@users.noreply.github.com  (the modern form)
- *   <login>@users.noreply.github.com       (the legacy form; no id available)
- */
-function parseNoreply(email) {
-    const m = /^(.+)@users\.noreply\.github\.com$/i.exec(email);
-    if (!m)
-        return {};
-    const local = m[1];
-    const plus = local.indexOf('+');
-    if (plus < 0)
-        return { login: local };
-    const idPart = local.slice(0, plus);
-    const loginPart = local.slice(plus + 1);
-    const id = /^\d+$/.test(idPart) ? parseInt(idPart, 10) : undefined;
-    return Object.assign({ login: loginPart }, (id === undefined ? {} : { id }));
-}
-function parseCoAuthors(message) {
-    const seen = new Set();
-    const out = [];
-    for (const rawLine of message.split(/\r?\n/)) {
-        const m = TRAILER_RE.exec(rawLine);
-        if (!m)
-            continue;
-        const name = m[1].trim();
-        const email = m[2].trim();
-        const key = `${name.toLowerCase()}:${email.toLowerCase()}`;
-        if (seen.has(key))
-            continue;
-        seen.add(key);
-        const noreply = parseNoreply(email);
-        out.push(Object.assign(Object.assign({ name,
-            email }, (noreply.login ? { noreplyLogin: noreply.login } : {})), (noreply.id ? { noreplyId: noreply.id } : {})));
-    }
-    return out;
 }
 
 

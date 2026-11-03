@@ -382,7 +382,14 @@ describe('CLA action end-to-end scenarios', () => {
         {
           author: { login: 'alice', id: 1001 },
           message:
-            'Implement thing\n\nBody of commit.\n\nCo-authored-by: Bob <2002+bob@users.noreply.github.com>'
+            'Implement thing\n\nBody of commit.\n\nCo-authored-by: Bob <2002+bob@users.noreply.github.com>',
+          coAuthors: [
+            {
+              login: 'bob',
+              id: 2002,
+              email: '2002+bob@users.noreply.github.com'
+            }
+          ]
         }
       ]
     })
@@ -432,7 +439,8 @@ describe('CLA action end-to-end scenarios', () => {
       commits: [
         {
           author: { login: 'alice', id: 1001 },
-          message: 'Fix\n\nCo-authored-by: Carol <carol@example.com>'
+          message: 'Fix\n\nCo-authored-by: Carol <carol@example.com>',
+          coAuthors: [{ name: 'Carol', email: 'carol@example.com' }]
         }
       ]
     })

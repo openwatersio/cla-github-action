@@ -12,6 +12,9 @@ commit that introduced it.
 ## Unreleased
 
 - Open Waters maintains its own fork with pinned CI actions, Node 24 checks, weekly dependency updates, and verification of the committed action bundle.
+- Resolve primary authors and co-authors through GitHub's account identities, including legacy noreply and verified email addresses. Reject null author entries and commits with more than 100 authors instead of skipping contributors.
+- Preserve email exemptions for linked co-authors while requiring the authenticated human PR opener to sign. Signing exemptions do not bypass the opener authorship guard or its diagnostic output. Authorship follows GitHub's recognized trailers; an unrelated committer identity does not stand in for an unlinked author.
+- **Compatibility:** allowlist wildcards match the whole login, name, or email address. Replace patterns that relied on substring matching; use `*[bot]` for bot suffixes instead of `bot*`. Email exemptions do not exempt the authenticated human opener from signing unless their login is also exempt. Show each linked account once after applying exemptions, while keeping unlinked authors distinct.
 
 ## v3.2.0 — 2026-06-17
 
