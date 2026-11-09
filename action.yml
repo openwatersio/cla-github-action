@@ -49,6 +49,22 @@ inputs:
       others (cherry-picks, release-engineering patch submission, mailing-list
       style contribution workflows).
     default: "true"
+  status-context:
+    description: >
+      Report the result as a commit status with this context on the pull
+      request's head commit, instead of only passing or failing the job. Use
+      this from `workflow_run` and `issue_comment` workflows, which run on the
+      base repository and so cannot report on the pull request through their
+      own job. Signing by comment then updates the status directly instead of
+      rerunning a workflow.
+    default: ""
+  head-sha:
+    description: >
+      Head commit of the pull request to check, normally
+      `github.event.workflow_run.head_sha`. The action checks the open pull
+      request whose head is this commit. Requires `status-context`. Leave empty
+      on `issue_comment` events, where the pull request is the one commented on.
+    default: ""
 outputs:
   opener_not_in_commits:
     description: >

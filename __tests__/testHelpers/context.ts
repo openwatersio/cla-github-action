@@ -26,7 +26,16 @@ export function setContext(overrides: Partial<TestContext> = {}): TestContext {
   // @ts-ignore — overwrite the readonly Context instance for test setup
   github.context = {
     repo: { owner: ctx.owner, repo: ctx.repo },
-    issue: { owner: ctx.owner, repo: ctx.repo, number: ctx.issueNumber },
+    // A getter like the real Context, so a pull request loaded into the payload is seen.
+    get issue() {
+      const fromPayload = (this.payload.issue || this.payload.pull_request)
+        ?.number
+      return {
+        owner: ctx.owner,
+        repo: ctx.repo,
+        number: fromPayload ?? ctx.issueNumber
+      }
+    },
     actor: ctx.actor,
     eventName: ctx.eventName,
     workflow: ctx.workflow,

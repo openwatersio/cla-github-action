@@ -3,7 +3,7 @@
 >
 > Consumers must pin a reviewed commit SHA. Open Waters owns dependency updates, security fixes, and the committed JavaScript bundle. Upstream changes are reviewed before adoption. [CHANGELOG.md](./CHANGELOG.md) records the upstream changes.
 
-For the protected-main integration, follow the [Open Waters CLA setup](docs/open-waters.md).
+For the protected-main integration, follow the [Open Waters CLA setup](docs/open-waters.md). It runs without `pull_request_target`: a secret-free `pull_request` workflow triggers a `workflow_run` workflow that checks the pull request and reports a `cla` commit status on its head (the `status-context` and `head-sha` inputs).
 
 ## Development
 
@@ -193,6 +193,8 @@ This PAT should have repo scope and is only required if you have configured to s
 | `suggest-recheck`   | _optional_ | Boolean input for indicating if the action's comment should suggest that users comment `recheck`. Default is set to `true`. | false |
 | `use-dco-flag`   | _optional_ | Boolean input. Set to `true` to run the action in DCO (Developer Certificate of Origin) mode instead of CLA mode. The bot's prompts and persistence logic use DCO wording. Default is `false`. | true |
 | `require-opener-as-author`   | _optional_ | Boolean input. When `true` (the default), fail the check if the Pull Request opener is not recorded as an author or co-author of any commit. Guards against an attacker opening a PR whose commits are attributed to an identity they do not control. Set to `false` for workflows that legitimately involve submitting commits authored by others (cherry-picks, release-engineering patch submission, mailing-list-style contribution). | false |
+| `status-context`   | _optional_ | Report the result as a commit status with this context on the pull request's head commit, for `workflow_run` and `issue_comment` workflows, which run on the base repository and cannot report on the pull request through their own job. Signing by comment then updates the status instead of rerunning a workflow. Needs `statuses: write`. | cla |
+| `head-sha`   | _optional_ | With `status-context`, check the open pull request whose head is this commit. Pass `github.event.workflow_run.head_sha`; leave empty on `issue_comment`. | ${{ github.event.workflow_run.head_sha }} |
 
 ### Outputs
 

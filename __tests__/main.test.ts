@@ -97,7 +97,9 @@ describe('Pull request event', () => {
   })
 
   test('the unlockPullRequest method should not be called if lock-pullrequest-aftermerge is disabled', async () => {
-    mockedCoreGetInput.mockImplementation(() => 'false')
+    mockedCoreGetInput.mockImplementation((name: string) =>
+      name === 'lock-pullrequest-aftermerge' ? 'false' : ''
+    )
     github.context.payload.action = 'reopened'
     github.context.payload.pull_request!.locked = true
     await run()
@@ -106,7 +108,9 @@ describe('Pull request event', () => {
   })
 
   test('the checkcla method should be called on a merged/closed pull request if lock-pullrequest-aftermerge is disabled', async () => {
-    mockedCoreGetInput.mockImplementation(() => 'false')
+    mockedCoreGetInput.mockImplementation((name: string) =>
+      name === 'lock-pullrequest-aftermerge' ? 'false' : ''
+    )
     await run()
     expect(mockedLockPullRequest).not.toHaveBeenCalled()
     expect(mockedGetClas).toHaveBeenCalled()

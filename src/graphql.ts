@@ -28,6 +28,7 @@ interface GraphQLEdge {
 interface GraphQLResponse {
   repository: {
     pullRequest: {
+      headRefOid: string
       commits: {
         totalCount: number
         edges: GraphQLEdge[]
@@ -42,6 +43,7 @@ const COMMITS_QUERY = `
 query($owner:String! $name:String! $number:Int! $cursor:String){
     repository(owner: $owner, name: $name) {
         pullRequest(number: $number) {
+            headRefOid
             commits(first: 100, after: $cursor) {
                 totalCount
                 edges {
@@ -65,7 +67,13 @@ query($owner:String! $name:String! $number:Int! $cursor:String){
     }
 }`
 
-export default async function getCommitters(): Promise<Committer[]> {
+/**
+ * `expectedHead`, when given, must be the pull request's head while its
+ * commits are read, so a result is never reported against a different commit.
+ */
+export default async function getCommitters(
+  expectedHead?: string
+): Promise<Committer[]> {
   try {
     const seenKeys = new Set<string>()
     const committers: Committer[] = []
@@ -89,7 +97,13 @@ export default async function getCommitters(): Promise<Committer[]> {
         cursor
       })) as GraphQLResponse
 
-      const page = response.repository.pullRequest.commits
+      const pullRequest = response.repository.pullRequest
+      if (expectedHead && pullRequest.headRefOid !== expectedHead) {
+        throw new Error(
+          `pull request head moved from ${expectedHead} to ${pullRequest.headRefOid}`
+        )
+      }
+      const page = pullRequest.commits
       for (const edge of page.edges) {
         const commit = edge.node.commit
         // shortcut: fail closed above 100 authors per commit; paginate if larger commits are needed.

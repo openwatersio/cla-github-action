@@ -31921,6 +31921,7 @@ const COMMITS_QUERY = `
 query($owner:String! $name:String! $number:Int! $cursor:String){
     repository(owner: $owner, name: $name) {
         pullRequest(number: $number) {
+            headRefOid
             commits(first: 100, after: $cursor) {
                 totalCount
                 edges {
@@ -31943,7 +31944,11 @@ query($owner:String! $name:String! $number:Int! $cursor:String){
         }
     }
 }`;
-function getCommitters() {
+/**
+ * `expectedHead`, when given, must be the pull request's head while its
+ * commits are read, so a result is never reported against a different commit.
+ */
+function getCommitters(expectedHead) {
     return __awaiter(this, void 0, void 0, function* () {
         try {
             const seenKeys = new Set();
@@ -31965,7 +31970,11 @@ function getCommitters() {
                     number: github_1.context.issue.number,
                     cursor
                 }));
-                const page = response.repository.pullRequest.commits;
+                const pullRequest = response.repository.pullRequest;
+                if (expectedHead && pullRequest.headRefOid !== expectedHead) {
+                    throw new Error(`pull request head moved from ${expectedHead} to ${pullRequest.headRefOid}`);
+                }
+                const page = pullRequest.commits;
                 for (const edge of page.edges) {
                     const commit = edge.node.commit;
                     // shortcut: fail closed above 100 authors per commit; paginate if larger commits are needed.
@@ -32050,6 +32059,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.run = run;
 const github_1 = __nccwpck_require__(3228);
 const setupClaCheck_1 = __nccwpck_require__(2642);
+const statusMode_1 = __nccwpck_require__(9488);
 const pullRequestLock_1 = __nccwpck_require__(2777);
 const core = __importStar(__nccwpck_require__(7484));
 const input = __importStar(__nccwpck_require__(1902));
@@ -32058,6 +32068,10 @@ function run() {
         var _a, _b;
         try {
             core.info(`CLA Assistant GitHub Action bot has started the process`);
+            const statusContext = input.getStatusContext();
+            if (statusContext) {
+                return yield (0, statusMode_1.runWithStatus)(statusContext);
+            }
             if (github_1.context.payload.action === 'closed' &&
                 input.lockPullRequestAfterMerge()) {
                 if ((_a = github_1.context.payload.pull_request) === null || _a === void 0 ? void 0 : _a.merged) {
@@ -33059,10 +33073,14 @@ const pullRequestComment_1 = __importDefault(__nccwpck_require__(3677));
 const pullRerunRunner_1 = __nccwpck_require__(8272);
 const errors_1 = __nccwpck_require__(7848);
 const getInputs_1 = __nccwpck_require__(1902);
-function setupClaCheck() {
+/**
+ * Returns whether the check passed. `expectedHead`, when given, is the head
+ * commit the result is for; the check throws if the pull request has moved.
+ */
+function setupClaCheck(expectedHead) {
     return __awaiter(this, void 0, void 0, function* () {
         let committerMap = getInitialCommittersMap();
-        const commitAuthors = yield (0, graphql_1.default)();
+        const commitAuthors = yield (0, graphql_1.default)(expectedHead);
         const openerMismatch = detectOpenerMismatch(commitAuthors);
         let committers = (0, checkAllowList_1.checkAllowList)(commitAuthors);
         // An exempt credit email must not exempt the authenticated PR opener.
@@ -33084,24 +33102,28 @@ function setupClaCheck() {
                 core.info(`All contributors have signed the CLA 📝 ✅ `);
                 // reRunLastWorkFlowIfRequired is best-effort: its failure should not
                 // fail the CLA check (we already know all contributors signed).
+                // Status mode reports on the head commit itself, so it needs no rerun.
                 try {
-                    yield (0, pullRerunRunner_1.reRunLastWorkFlowIfRequired)();
+                    if (!(0, getInputs_1.getStatusContext)())
+                        yield (0, pullRerunRunner_1.reRunLastWorkFlowIfRequired)();
                 }
                 catch (err) {
                     core.warning(`Best-effort rerun of prior workflow failed: ${(0, errors_1.errorMessage)(err)}`);
                 }
                 if (openerMismatch === null || openerMismatch === void 0 ? void 0 : openerMismatch.hardFail) {
                     core.setFailed(`Pull Request opener @${openerMismatch.opener} is not recorded as an author or co-author of any commit in this PR. If this is intentional (e.g. a cherry-pick or release-engineering workflow), set the 'require-opener-as-author' action input to 'false'.`);
-                    return;
+                    return false;
                 }
-                return;
+                return true;
             }
             else {
                 core.setFailed(`Committers of Pull Request number ${github_1.context.issue.number} have to sign the CLA 📝`);
+                return false;
             }
         }
         catch (err) {
             core.setFailed(`Could not update the JSON file: ${(0, errors_1.errorMessage)(err)}`);
+            return false;
         }
     });
 }
@@ -33279,7 +33301,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.requireOpenerAsAuthor = exports.suggestRecheck = exports.lockPullRequestAfterMerge = exports.getCustomPrSignComment = exports.getUseDcoFlag = exports.getCustomAllSignedPrComment = exports.getCustomNotSignedPrComment = exports.getCreateFileCommitMessage = exports.getSignedCommitMessage = exports.getAllowListItem = exports.getBranch = exports.getPathToDocument = exports.getPathToSignatures = exports.getRemoteOrgName = exports.getRemoteRepoName = void 0;
+exports.requireOpenerAsAuthor = exports.suggestRecheck = exports.lockPullRequestAfterMerge = exports.getCustomPrSignComment = exports.getUseDcoFlag = exports.getCustomAllSignedPrComment = exports.getCustomNotSignedPrComment = exports.getCreateFileCommitMessage = exports.getSignedCommitMessage = exports.getAllowListItem = exports.getBranch = exports.getHeadSha = exports.getStatusContext = exports.getPathToDocument = exports.getPathToSignatures = exports.getRemoteOrgName = exports.getRemoteRepoName = void 0;
 const core = __importStar(__nccwpck_require__(7484));
 const getRemoteRepoName = () => {
     return core.getInput('remote-repository-name', { required: false });
@@ -33293,6 +33315,12 @@ const getPathToSignatures = () => core.getInput('path-to-signatures', { required
 exports.getPathToSignatures = getPathToSignatures;
 const getPathToDocument = () => core.getInput('path-to-document', { required: false });
 exports.getPathToDocument = getPathToDocument;
+/** Commit status context to report the result on; empty means fail the job instead. */
+const getStatusContext = () => core.getInput('status-context', { required: false });
+exports.getStatusContext = getStatusContext;
+/** Head commit of the pull request to check, from a `workflow_run` event. */
+const getHeadSha = () => core.getInput('head-sha', { required: false });
+exports.getHeadSha = getHeadSha;
 const getBranch = () => core.getInput('branch', { required: false });
 exports.getBranch = getBranch;
 const getAllowListItem = () => core.getInput('allowlist', { required: false });
@@ -33399,6 +33427,143 @@ function getPrSignComment() {
     return input.getUseDcoFlag()
         ? exports.DEFAULT_DCO_SIGN_PHRASE
         : exports.DEFAULT_CLA_SIGN_PHRASE;
+}
+
+
+/***/ }),
+
+/***/ 9488:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.runWithStatus = runWithStatus;
+const core = __importStar(__nccwpck_require__(7484));
+const github_1 = __nccwpck_require__(3228);
+const octokit_1 = __nccwpck_require__(3848);
+const setupClaCheck_1 = __nccwpck_require__(2642);
+const errors_1 = __nccwpck_require__(7848);
+const input = __importStar(__nccwpck_require__(1902));
+/**
+ * Check a pull request from a base-repository event (`workflow_run` or
+ * `issue_comment`) and report the result as a commit status on its head.
+ *
+ * With `head-sha` the pull request is the open one whose head is that commit,
+ * looked up through the API so nothing from the triggering run is trusted.
+ * Without it, the pull request is the one the comment was made on.
+ */
+function runWithStatus(statusContext) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const headSha = yield loadPullRequest();
+        if (!headSha)
+            return;
+        let state;
+        let description;
+        try {
+            const passed = yield (0, setupClaCheck_1.setupClaCheck)(headSha);
+            state = passed ? 'success' : 'failure';
+            description = passed
+                ? 'All contributors have signed the CLA'
+                : 'Not all contributors have signed the CLA';
+        }
+        catch (error) {
+            core.setFailed((0, errors_1.errorMessage)(error));
+            state = 'error';
+            description = 'The CLA check could not complete';
+        }
+        yield octokit_1.octokit.rest.repos.createCommitStatus(Object.assign({ owner: github_1.context.repo.owner, repo: github_1.context.repo.repo, sha: headSha, state, context: statusContext, description }, (github_1.context.runId && {
+            target_url: `${github_1.context.serverUrl}/${github_1.context.repo.owner}/${github_1.context.repo.repo}/actions/runs/${github_1.context.runId}`
+        })));
+    });
+}
+/**
+ * Put the pull request into the event payload, where the rest of the action
+ * reads it, and return its head SHA. Returns undefined when no open pull
+ * request has the requested head, which means it has moved on and a newer run
+ * will check it.
+ */
+function loadPullRequest() {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a;
+        const headSha = input.getHeadSha();
+        let pr;
+        if (headSha) {
+            const open = yield octokit_1.octokit.paginate(octokit_1.octokit.rest.pulls.list, {
+                owner: github_1.context.repo.owner,
+                repo: github_1.context.repo.repo,
+                state: 'open',
+                per_page: 100
+            });
+            // The oldest pull request wins when several share a head, so a later copy cannot take over the status.
+            const matches = open
+                .filter(p => p.head.sha === headSha)
+                .sort((a, b) => a.number - b.number);
+            pr = matches[0];
+            if (!pr) {
+                core.info(`No open pull request has head ${headSha}; nothing to check`);
+                return undefined;
+            }
+            if (matches.length > 1) {
+                core.warning(`Pull requests ${matches.map(p => `#${p.number}`).join(', ')} share head ${headSha}; checking #${pr.number}`);
+            }
+        }
+        else {
+            if (!((_a = github_1.context.payload.issue) === null || _a === void 0 ? void 0 : _a.pull_request)) {
+                core.info('This comment is not on a pull request; nothing to check');
+                return undefined;
+            }
+            pr = (yield octokit_1.octokit.rest.pulls.get({
+                owner: github_1.context.repo.owner,
+                repo: github_1.context.repo.repo,
+                pull_number: github_1.context.issue.number
+            })).data;
+        }
+        github_1.context.payload.pull_request = pr;
+        return pr.head.sha;
+    });
 }
 
 
