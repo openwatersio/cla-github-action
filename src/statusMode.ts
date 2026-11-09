@@ -1,9 +1,16 @@
 import * as core from '@actions/core'
 import { context } from '@actions/github'
 import { octokit } from './octokit'
+import { getFileContent } from './persistence/persistence'
 import { setupClaCheck } from './setupClaCheck'
 import { errorMessage } from './shared/errors'
 import * as input from './shared/getInputs'
+
+type PullRequest = NonNullable<typeof context.payload.pull_request>
+type State = 'success' | 'failure' | 'error'
+
+/** A signature written mid-check can make one more pass necessary; this bounds the passes. */
+const MAX_ATTEMPTS = 3
 
 /**
  * Check a pull request from a base-repository event (`workflow_run` or
@@ -14,27 +21,74 @@ import * as input from './shared/getInputs'
  * Without it, the pull request is the one the comment was made on.
  */
 export async function runWithStatus(statusContext: string): Promise<void> {
-  const headSha = await loadPullRequest()
-  if (!headSha) return
+  const found = await loadPullRequest()
+  if (!found) return
+  const { pr, sharing } = found
+  const headSha: string = pr.head.sha
 
-  let state: 'success' | 'failure' | 'error'
-  let description: string
+  // A status belongs to the commit, so every pull request with this head would share one result.
+  if (sharing.length > 1) {
+    const numbers = sharing.map(p => `#${p.number}`).join(', ')
+    core.setFailed(
+      `Open pull requests ${numbers} share head ${headSha}; close all but one to check the CLA`
+    )
+    await postStatus(
+      statusContext,
+      headSha,
+      'error',
+      'Several open pull requests share this commit; close all but one'
+    )
+    return
+  }
+  context.payload.pull_request = pr
+
+  for (let attempt = 1; ; attempt++) {
+    const signaturesBefore = await signaturesVersion()
+    const state = await check(headSha)
+    await postStatus(statusContext, headSha, state, describe(state))
+    // Signatures are only ever added, so a result other than success can go
+    // stale: a signing run that wrote after this check read the file may have
+    // posted its success first, and a concurrent write rejects this run's own.
+    // Check again against the newer file.
+    const settled =
+      state === 'success' ||
+      attempt === MAX_ATTEMPTS ||
+      (await signaturesVersion()) === signaturesBefore
+    if (settled) {
+      // The status carries an unsigned result; failing the job too would mark
+      // the default branch's commit red. Errors still fail the job.
+      process.exitCode = state === 'error' ? core.ExitCode.Failure : 0
+      return
+    }
+    core.info('The signatures file changed during the check; checking again')
+  }
+}
+
+async function check(headSha: string): Promise<State> {
   try {
-    const passed = await setupClaCheck(headSha)
-    state = passed ? 'success' : 'failure'
-    description = passed
-      ? 'All contributors have signed the CLA'
-      : 'Not all contributors have signed the CLA'
+    return (await setupClaCheck(headSha)) ? 'success' : 'failure'
   } catch (error) {
     core.setFailed(errorMessage(error))
-    state = 'error'
-    description = 'The CLA check could not complete'
+    return 'error'
   }
+}
 
+function describe(state: State): string {
+  if (state === 'success') return 'All contributors have signed the CLA'
+  if (state === 'failure') return 'Not all contributors have signed the CLA'
+  return 'The CLA check could not complete'
+}
+
+async function postStatus(
+  statusContext: string,
+  sha: string,
+  state: State,
+  description: string
+): Promise<void> {
   await octokit.rest.repos.createCommitStatus({
     owner: context.repo.owner,
     repo: context.repo.repo,
-    sha: headSha,
+    sha,
     state,
     context: statusContext,
     description,
@@ -44,51 +98,63 @@ export async function runWithStatus(statusContext: string): Promise<void> {
   })
 }
 
+async function signaturesVersion(): Promise<string | undefined> {
+  try {
+    return (await getFileContent())?.data?.sha
+  } catch {
+    return undefined
+  }
+}
+
 /**
- * Put the pull request into the event payload, where the rest of the action
- * reads it, and return its head SHA. Returns undefined when no open pull
- * request has the requested head, which means it has moved on and a newer run
- * will check it.
+ * Find the pull request to check and the open pull requests that share its
+ * head. Returns undefined when there is nothing to check: no open pull request
+ * has the requested head (it has moved on and a newer run will check it), or
+ * the comment is not on an open pull request.
  */
-async function loadPullRequest(): Promise<string | undefined> {
+async function loadPullRequest(): Promise<
+  { pr: PullRequest; sharing: PullRequest[] } | undefined
+> {
   const headSha = input.getHeadSha()
-  let pr
   if (headSha) {
-    const open = await octokit.paginate(octokit.rest.pulls.list, {
-      owner: context.repo.owner,
-      repo: context.repo.repo,
-      state: 'open',
-      per_page: 100
-    })
-    // The oldest pull request wins when several share a head, so a later copy cannot take over the status.
-    const matches = open
-      .filter(p => p.head.sha === headSha)
-      .sort((a, b) => a.number - b.number)
-    pr = matches[0]
+    const sharing = await openPullRequestsWithHead(headSha)
+    const pr = sharing[0]
     if (!pr) {
       core.info(`No open pull request has head ${headSha}; nothing to check`)
       return undefined
     }
-    if (matches.length > 1) {
-      core.warning(
-        `Pull requests ${matches.map(p => `#${p.number}`).join(', ')} share head ${headSha}; checking #${pr.number}`
-      )
-    }
-  } else {
-    if (!context.payload.issue?.pull_request) {
-      core.info('This comment is not on a pull request; nothing to check')
-      return undefined
-    }
-    pr = (
-      await octokit.rest.pulls.get({
-        owner: context.repo.owner,
-        repo: context.repo.repo,
-        pull_number: context.issue.number
-      })
-    ).data
+    return { pr, sharing }
   }
-  context.payload.pull_request = pr as NonNullable<
-    typeof context.payload.pull_request
-  >
-  return pr.head.sha
+
+  if (context.eventName !== 'issue_comment') {
+    throw new Error(
+      `head-sha is required with status-context on ${context.eventName} events`
+    )
+  }
+  if (!context.payload.issue?.pull_request) {
+    core.info('This comment is not on a pull request; nothing to check')
+    return undefined
+  }
+  const pr = (
+    await octokit.rest.pulls.get({
+      owner: context.repo.owner,
+      repo: context.repo.repo,
+      pull_number: context.issue.number
+    })
+  ).data as PullRequest
+  if (pr.state !== 'open') {
+    core.info(`Pull request #${pr.number} is ${pr.state}; nothing to check`)
+    return undefined
+  }
+  return { pr, sharing: await openPullRequestsWithHead(pr.head.sha) }
+}
+
+async function openPullRequestsWithHead(sha: string): Promise<PullRequest[]> {
+  const open = await octokit.paginate(octokit.rest.pulls.list, {
+    owner: context.repo.owner,
+    repo: context.repo.repo,
+    state: 'open',
+    per_page: 100
+  })
+  return open.filter(p => p.head.sha === sha) as PullRequest[]
 }

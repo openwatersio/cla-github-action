@@ -14,6 +14,9 @@ export async function run() {
     core.info(`CLA Assistant GitHub Action bot has started the process`)
 
     const statusContext = input.getStatusContext()
+    if (input.getHeadSha() && !statusContext) {
+      throw new Error('head-sha requires status-context')
+    }
     if (statusContext) {
       return await runWithStatus(statusContext)
     }

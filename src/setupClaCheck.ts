@@ -82,7 +82,10 @@ export async function setupClaCheck(expectedHead?: string): Promise<boolean> {
       return false
     }
   } catch (err) {
-    core.setFailed(`Could not update the JSON file: ${errorMessage(err)}`)
+    const message = `Could not update the JSON file: ${errorMessage(err)}`
+    // Status mode reports this as an error, distinct from an unsigned result.
+    if (getStatusContext()) throw new Error(message)
+    core.setFailed(message)
     return false
   }
 }

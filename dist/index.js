@@ -32069,6 +32069,9 @@ function run() {
         try {
             core.info(`CLA Assistant GitHub Action bot has started the process`);
             const statusContext = input.getStatusContext();
+            if (input.getHeadSha() && !statusContext) {
+                throw new Error('head-sha requires status-context');
+            }
             if (statusContext) {
                 return yield (0, statusMode_1.runWithStatus)(statusContext);
             }
@@ -33122,7 +33125,11 @@ function setupClaCheck(expectedHead) {
             }
         }
         catch (err) {
-            core.setFailed(`Could not update the JSON file: ${(0, errors_1.errorMessage)(err)}`);
+            const message = `Could not update the JSON file: ${(0, errors_1.errorMessage)(err)}`;
+            // Status mode reports this as an error, distinct from an unsigned result.
+            if ((0, getInputs_1.getStatusContext)())
+                throw new Error(message);
+            core.setFailed(message);
             return false;
         }
     });
@@ -33484,9 +33491,12 @@ exports.runWithStatus = runWithStatus;
 const core = __importStar(__nccwpck_require__(7484));
 const github_1 = __nccwpck_require__(3228);
 const octokit_1 = __nccwpck_require__(3848);
+const persistence_1 = __nccwpck_require__(582);
 const setupClaCheck_1 = __nccwpck_require__(2642);
 const errors_1 = __nccwpck_require__(7848);
 const input = __importStar(__nccwpck_require__(1902));
+/** A signature written mid-check can make one more pass necessary; this bounds the passes. */
+const MAX_ATTEMPTS = 3;
 /**
  * Check a pull request from a base-repository event (`workflow_run` or
  * `issue_comment`) and report the result as a commit status on its head.
@@ -33497,72 +33507,124 @@ const input = __importStar(__nccwpck_require__(1902));
  */
 function runWithStatus(statusContext) {
     return __awaiter(this, void 0, void 0, function* () {
-        const headSha = yield loadPullRequest();
-        if (!headSha)
+        const found = yield loadPullRequest();
+        if (!found)
             return;
-        let state;
-        let description;
+        const { pr, sharing } = found;
+        const headSha = pr.head.sha;
+        // A status belongs to the commit, so every pull request with this head would share one result.
+        if (sharing.length > 1) {
+            const numbers = sharing.map(p => `#${p.number}`).join(', ');
+            core.setFailed(`Open pull requests ${numbers} share head ${headSha}; close all but one to check the CLA`);
+            yield postStatus(statusContext, headSha, 'error', 'Several open pull requests share this commit; close all but one');
+            return;
+        }
+        github_1.context.payload.pull_request = pr;
+        for (let attempt = 1;; attempt++) {
+            const signaturesBefore = yield signaturesVersion();
+            const state = yield check(headSha);
+            yield postStatus(statusContext, headSha, state, describe(state));
+            // Signatures are only ever added, so a result other than success can go
+            // stale: a signing run that wrote after this check read the file may have
+            // posted its success first, and a concurrent write rejects this run's own.
+            // Check again against the newer file.
+            const settled = state === 'success' ||
+                attempt === MAX_ATTEMPTS ||
+                (yield signaturesVersion()) === signaturesBefore;
+            if (settled) {
+                // The status carries an unsigned result; failing the job too would mark
+                // the default branch's commit red. Errors still fail the job.
+                process.exitCode = state === 'error' ? core.ExitCode.Failure : 0;
+                return;
+            }
+            core.info('The signatures file changed during the check; checking again');
+        }
+    });
+}
+function check(headSha) {
+    return __awaiter(this, void 0, void 0, function* () {
         try {
-            const passed = yield (0, setupClaCheck_1.setupClaCheck)(headSha);
-            state = passed ? 'success' : 'failure';
-            description = passed
-                ? 'All contributors have signed the CLA'
-                : 'Not all contributors have signed the CLA';
+            return (yield (0, setupClaCheck_1.setupClaCheck)(headSha)) ? 'success' : 'failure';
         }
         catch (error) {
             core.setFailed((0, errors_1.errorMessage)(error));
-            state = 'error';
-            description = 'The CLA check could not complete';
+            return 'error';
         }
-        yield octokit_1.octokit.rest.repos.createCommitStatus(Object.assign({ owner: github_1.context.repo.owner, repo: github_1.context.repo.repo, sha: headSha, state, context: statusContext, description }, (github_1.context.runId && {
+    });
+}
+function describe(state) {
+    if (state === 'success')
+        return 'All contributors have signed the CLA';
+    if (state === 'failure')
+        return 'Not all contributors have signed the CLA';
+    return 'The CLA check could not complete';
+}
+function postStatus(statusContext, sha, state, description) {
+    return __awaiter(this, void 0, void 0, function* () {
+        yield octokit_1.octokit.rest.repos.createCommitStatus(Object.assign({ owner: github_1.context.repo.owner, repo: github_1.context.repo.repo, sha,
+            state, context: statusContext, description }, (github_1.context.runId && {
             target_url: `${github_1.context.serverUrl}/${github_1.context.repo.owner}/${github_1.context.repo.repo}/actions/runs/${github_1.context.runId}`
         })));
     });
 }
+function signaturesVersion() {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b;
+        try {
+            return (_b = (_a = (yield (0, persistence_1.getFileContent)())) === null || _a === void 0 ? void 0 : _a.data) === null || _b === void 0 ? void 0 : _b.sha;
+        }
+        catch (_c) {
+            return undefined;
+        }
+    });
+}
 /**
- * Put the pull request into the event payload, where the rest of the action
- * reads it, and return its head SHA. Returns undefined when no open pull
- * request has the requested head, which means it has moved on and a newer run
- * will check it.
+ * Find the pull request to check and the open pull requests that share its
+ * head. Returns undefined when there is nothing to check: no open pull request
+ * has the requested head (it has moved on and a newer run will check it), or
+ * the comment is not on an open pull request.
  */
 function loadPullRequest() {
     return __awaiter(this, void 0, void 0, function* () {
         var _a;
         const headSha = input.getHeadSha();
-        let pr;
         if (headSha) {
-            const open = yield octokit_1.octokit.paginate(octokit_1.octokit.rest.pulls.list, {
-                owner: github_1.context.repo.owner,
-                repo: github_1.context.repo.repo,
-                state: 'open',
-                per_page: 100
-            });
-            // The oldest pull request wins when several share a head, so a later copy cannot take over the status.
-            const matches = open
-                .filter(p => p.head.sha === headSha)
-                .sort((a, b) => a.number - b.number);
-            pr = matches[0];
+            const sharing = yield openPullRequestsWithHead(headSha);
+            const pr = sharing[0];
             if (!pr) {
                 core.info(`No open pull request has head ${headSha}; nothing to check`);
                 return undefined;
             }
-            if (matches.length > 1) {
-                core.warning(`Pull requests ${matches.map(p => `#${p.number}`).join(', ')} share head ${headSha}; checking #${pr.number}`);
-            }
+            return { pr, sharing };
         }
-        else {
-            if (!((_a = github_1.context.payload.issue) === null || _a === void 0 ? void 0 : _a.pull_request)) {
-                core.info('This comment is not on a pull request; nothing to check');
-                return undefined;
-            }
-            pr = (yield octokit_1.octokit.rest.pulls.get({
-                owner: github_1.context.repo.owner,
-                repo: github_1.context.repo.repo,
-                pull_number: github_1.context.issue.number
-            })).data;
+        if (github_1.context.eventName !== 'issue_comment') {
+            throw new Error(`head-sha is required with status-context on ${github_1.context.eventName} events`);
         }
-        github_1.context.payload.pull_request = pr;
-        return pr.head.sha;
+        if (!((_a = github_1.context.payload.issue) === null || _a === void 0 ? void 0 : _a.pull_request)) {
+            core.info('This comment is not on a pull request; nothing to check');
+            return undefined;
+        }
+        const pr = (yield octokit_1.octokit.rest.pulls.get({
+            owner: github_1.context.repo.owner,
+            repo: github_1.context.repo.repo,
+            pull_number: github_1.context.issue.number
+        })).data;
+        if (pr.state !== 'open') {
+            core.info(`Pull request #${pr.number} is ${pr.state}; nothing to check`);
+            return undefined;
+        }
+        return { pr, sharing: yield openPullRequestsWithHead(pr.head.sha) };
+    });
+}
+function openPullRequestsWithHead(sha) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const open = yield octokit_1.octokit.paginate(octokit_1.octokit.rest.pulls.list, {
+            owner: github_1.context.repo.owner,
+            repo: github_1.context.repo.repo,
+            state: 'open',
+            per_page: 100
+        });
+        return open.filter(p => p.head.sha === sha);
     });
 }
 

@@ -39,6 +39,7 @@ describe('status mode', () => {
   })
   afterEach(async () => {
     jest.restoreAllMocks()
+    process.exitCode = undefined
     await fake.close()
     resetEnv()
   })
@@ -69,7 +70,8 @@ describe('status mode', () => {
     expect(repo().state.statuses).toEqual([
       { sha: 'headsha', state: 'failure', context: 'cla' }
     ])
-    expect(failed).toHaveBeenCalled()
+    // The status carries the failure; the job itself ends successfully.
+    expect(process.exitCode).toBe(0)
   })
 
   it('sets a passing status when everyone has signed', async () => {
@@ -110,6 +112,151 @@ describe('status mode', () => {
     expect(repo().listComments(7)).toHaveLength(0)
     expect(repo().state.statuses).toEqual([])
     expect(failed).not.toHaveBeenCalled()
+  })
+
+  it('reports an error when several open pull requests share the head', async () => {
+    repo().setFile('signatures/cla.json', {
+      signedContributors: [{ name: 'alice', id: 1001 }]
+    })
+    repo().addPullRequest({
+      number: 9,
+      head: { sha: 'headsha', ref: 'copy' },
+      user: { login: 'mallory', id: 666 },
+      commits: [{ author: alice }]
+    })
+    workflowRun('headsha')
+    await runAction()
+
+    expect(repo().state.statuses).toEqual([
+      { sha: 'headsha', state: 'error', context: 'cla' }
+    ])
+    expect(repo().listComments(7)).toHaveLength(0)
+  })
+
+  it('reports an error from a comment when another open pull request shares the head', async () => {
+    repo().setFile('signatures/cla.json', {
+      signedContributors: [{ name: 'alice', id: 1001 }]
+    })
+    repo().addPullRequest({
+      number: 9,
+      head: { sha: 'headsha', ref: 'copy' },
+      user: { login: 'mallory', id: 666 },
+      commits: [{ author: alice }]
+    })
+    setContext({
+      issueNumber: 7,
+      eventName: 'issue_comment',
+      payload: {
+        action: 'created',
+        issue: { number: 7, pull_request: {} },
+        comment: { body: 'recheck', user: alice },
+        repository: { id: repo().state.id }
+      }
+    })
+    await runAction()
+
+    expect(repo().state.statuses).toEqual([
+      { sha: 'headsha', state: 'error', context: 'cla' }
+    ])
+  })
+
+  it('checks again when a signature lands during the check, so a stale failure is not last', async () => {
+    // The file already holds alice's signature, but the first two reads see the older, empty file.
+    repo().setFile('signatures/cla.json', {
+      signedContributors: [{ name: 'alice', id: 1001 }]
+    })
+    fake.injectFailure({
+      method: 'GET',
+      pathPattern: /\/contents\//,
+      status: 200,
+      body: JSON.stringify({
+        sha: 'oldfile',
+        content: Buffer.from('{"signedContributors":[]}').toString('base64'),
+        encoding: 'base64'
+      }),
+      headers: { 'content-type': 'application/json' },
+      times: 2
+    })
+    workflowRun('headsha')
+    await runAction()
+
+    expect(repo().state.statuses).toEqual([
+      { sha: 'headsha', state: 'failure', context: 'cla' },
+      { sha: 'headsha', state: 'success', context: 'cla' }
+    ])
+    expect(process.exitCode).toBe(0)
+  })
+
+  it('reports a rejected signature write as an error and fails the job', async () => {
+    repo().addComment(7, {
+      body: 'something **CLA Assistant Lite bot** says',
+      user: { login: 'github-actions[bot]', id: 41898282 }
+    })
+    repo().addComment(7, { body: signPhrase, user: alice })
+    fake.injectFailure({
+      method: 'PUT',
+      pathPattern: /\/contents\//,
+      status: 403,
+      times: 5
+    })
+    setContext({
+      issueNumber: 7,
+      eventName: 'issue_comment',
+      payload: {
+        action: 'created',
+        issue: { number: 7, pull_request: {} },
+        comment: { body: signPhrase, user: alice },
+        repository: { id: repo().state.id }
+      }
+    })
+    await runAction()
+
+    expect(repo().state.statuses).toEqual([
+      { sha: 'headsha', state: 'error', context: 'cla' }
+    ])
+    expect(String(failed.mock.calls[0]?.[0])).toMatch(
+      /Could not update the JSON file/
+    )
+    expect(process.exitCode).toBe(1)
+  })
+
+  it('fails without head-sha outside comment events', async () => {
+    setContext({
+      issueNumber: 7,
+      eventName: 'pull_request_target',
+      payload: { action: 'opened', pull_request: { number: 7 } }
+    })
+    await runAction()
+
+    expect(String(failed.mock.calls[0]?.[0])).toMatch(/head-sha is required/)
+    expect(repo().state.statuses).toEqual([])
+  })
+
+  it('rejects head-sha without status-context', async () => {
+    setDefaultInputs({ 'status-context': '', 'head-sha': 'headsha' })
+    setContext({ eventName: 'workflow_run', payload: {} })
+    await runAction()
+
+    expect(String(failed.mock.calls[0]?.[0])).toMatch(
+      /head-sha requires status-context/
+    )
+  })
+
+  it('ignores comments on closed pull requests', async () => {
+    repo().state.pulls.get(7)!.state = 'closed'
+    setContext({
+      issueNumber: 7,
+      eventName: 'issue_comment',
+      payload: {
+        action: 'created',
+        issue: { number: 7, pull_request: {} },
+        comment: { body: 'recheck', user: alice },
+        repository: { id: repo().state.id }
+      }
+    })
+    await runAction()
+
+    expect(repo().state.statuses).toEqual([])
   })
 
   it('ignores closed pull requests with the head SHA', async () => {
