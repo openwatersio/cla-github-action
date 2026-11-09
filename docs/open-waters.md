@@ -27,7 +27,7 @@ GitHub asks a maintainer to approve `pull_request` runs from some first-time con
 
 The signing phrase is `I have read the CLA Document and I hereby sign the CLA`. Preserve the bot allowlist and exempt the exact `noreply@anthropic.com` address used in Claude co-author trailers. Human contributors still need a recorded signature. Conversation locking is disabled.
 
-Keep signature-only commits out of application build lanes. If two runs try to update the signature file concurrently, GitHub rejects the stale file SHA instead of overwriting data; a `recheck` comment retries against the current file. The upstream action can update its signed comment before persistence completes. The workflow result and `.cla.json` are authoritative: a rejected write fails the check even if the comment acknowledges signing.
+Keep signature-only commits out of application build lanes. If two runs try to update the signature file concurrently, GitHub rejects the stale file SHA instead of overwriting data; a `recheck` comment retries against the current file. The upstream action can update its signed comment before persistence completes. The `cla` status and `.cla.json` are authoritative: a rejected write sets an `error` status even if the comment acknowledges signing.
 
 ## Verification
 
