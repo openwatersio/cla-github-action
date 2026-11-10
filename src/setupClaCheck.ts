@@ -17,12 +17,16 @@ import {
 import prCommentSetup from './pullrequest/pullRequestComment'
 import { reRunLastWorkFlowIfRequired } from './pullRerunRunner'
 import { errorMessage, errorStatus } from './shared/errors'
-import { requireOpenerAsAuthor } from './shared/getInputs'
+import { getStatusContext, requireOpenerAsAuthor } from './shared/getInputs'
 
-export async function setupClaCheck() {
+/**
+ * Returns whether the check passed. `expectedHead`, when given, is the head
+ * commit the result is for; the check throws if the pull request has moved.
+ */
+export async function setupClaCheck(expectedHead?: string): Promise<boolean> {
   let committerMap = getInitialCommittersMap()
 
-  const commitAuthors = await getCommitters()
+  const commitAuthors = await getCommitters(expectedHead)
   const openerMismatch = detectOpenerMismatch(commitAuthors)
   let committers = checkAllowList(commitAuthors)
   // An exempt credit email must not exempt the authenticated PR opener.
@@ -56,8 +60,9 @@ export async function setupClaCheck() {
       core.info(`All contributors have signed the CLA 📝 ✅ `)
       // reRunLastWorkFlowIfRequired is best-effort: its failure should not
       // fail the CLA check (we already know all contributors signed).
+      // Status mode reports on the head commit itself, so it needs no rerun.
       try {
-        await reRunLastWorkFlowIfRequired()
+        if (!getStatusContext()) await reRunLastWorkFlowIfRequired()
       } catch (err) {
         core.warning(
           `Best-effort rerun of prior workflow failed: ${errorMessage(err)}`
@@ -67,16 +72,21 @@ export async function setupClaCheck() {
         core.setFailed(
           `Pull Request opener @${openerMismatch.opener} is not recorded as an author or co-author of any commit in this PR. If this is intentional (e.g. a cherry-pick or release-engineering workflow), set the 'require-opener-as-author' action input to 'false'.`
         )
-        return
+        return false
       }
-      return
+      return true
     } else {
       core.setFailed(
         `Committers of Pull Request number ${context.issue.number} have to sign the CLA 📝`
       )
+      return false
     }
   } catch (err) {
-    core.setFailed(`Could not update the JSON file: ${errorMessage(err)}`)
+    const message = `Could not update the JSON file: ${errorMessage(err)}`
+    // Status mode reports this as an error, distinct from an unsigned result.
+    if (getStatusContext()) throw new Error(message)
+    core.setFailed(message)
+    return false
   }
 }
 

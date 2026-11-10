@@ -11,6 +11,7 @@ commit that introduced it.
 
 ## Unreleased
 
+- Run without `pull_request_target`. With `status-context`, the action reports its result as a commit status on the pull request's head, so a `workflow_run` workflow triggered by a secret-free `pull_request` workflow can check fork pull requests. `head-sha` selects the open pull request with that head through the API. Signing by comment updates the status instead of rerunning a workflow. Pull requests that share a head get an `error` status, and a check that overlaps a signature runs again. Without `status-context` the action behaves as before.
 - Check the parent fork daily and open one tracking issue per upstream tip with commits missing from this fork's history.
 - Open Waters maintains its own fork with pinned CI actions, Node 24 checks, weekly dependency updates, and verification of the committed action bundle.
 - Resolve primary authors and co-authors through GitHub's account identities, including legacy noreply and verified email addresses. Reject null author entries and commits with more than 100 authors instead of skipping contributors.

@@ -14,6 +14,14 @@ export const getPathToSignatures = (): string =>
 export const getPathToDocument = (): string =>
   core.getInput('path-to-document', { required: false })
 
+/** Commit status context to report the result on; empty means fail the job instead. */
+export const getStatusContext = (): string =>
+  core.getInput('status-context', { required: false })
+
+/** Head commit of the pull request to check, from a `workflow_run` event. */
+export const getHeadSha = (): string =>
+  core.getInput('head-sha', { required: false })
+
 export const getBranch = (): string =>
   core.getInput('branch', { required: false })
 

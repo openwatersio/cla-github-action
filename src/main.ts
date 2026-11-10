@@ -1,5 +1,6 @@
 import { context } from '@actions/github'
 import { setupClaCheck } from './setupClaCheck'
+import { runWithStatus } from './statusMode'
 import {
   lockPullRequest,
   unlockPullRequest
@@ -11,6 +12,14 @@ import * as input from './shared/getInputs'
 export async function run() {
   try {
     core.info(`CLA Assistant GitHub Action bot has started the process`)
+
+    const statusContext = input.getStatusContext()
+    if (input.getHeadSha() && !statusContext) {
+      throw new Error('head-sha requires status-context')
+    }
+    if (statusContext) {
+      return await runWithStatus(statusContext)
+    }
 
     if (
       context.payload.action === 'closed' &&
