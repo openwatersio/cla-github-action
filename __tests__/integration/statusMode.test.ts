@@ -220,6 +220,60 @@ describe('status mode', () => {
     expect(process.exitCode).toBe(1)
   })
 
+  it('reports an error on the requested head when the pull request lookup fails', async () => {
+    fake.injectFailure({
+      method: 'GET',
+      pathPattern: /\/pulls$/,
+      status: 403,
+      times: 5
+    })
+    workflowRun('headsha')
+    await runAction()
+
+    expect(repo().state.statuses).toEqual([
+      { sha: 'headsha', state: 'error', context: 'cla' }
+    ])
+    expect(failed).toHaveBeenCalled()
+  })
+
+  it('checks again when the signatures file version cannot be read', async () => {
+    repo().setFile('signatures/cla.json', {
+      signedContributors: [{ name: 'alice', id: 1001 }]
+    })
+    // Both version reads around the first check fail, and that check reads the older, empty file.
+    fake.injectFailure({
+      method: 'GET',
+      pathPattern: /\/contents\//,
+      status: 403,
+      times: 1
+    })
+    fake.injectFailure({
+      method: 'GET',
+      pathPattern: /\/contents\//,
+      status: 200,
+      body: JSON.stringify({
+        sha: 'oldfile',
+        content: Buffer.from('{"signedContributors":[]}').toString('base64'),
+        encoding: 'base64'
+      }),
+      headers: { 'content-type': 'application/json' },
+      times: 1
+    })
+    fake.injectFailure({
+      method: 'GET',
+      pathPattern: /\/contents\//,
+      status: 403,
+      times: 1
+    })
+    workflowRun('headsha')
+    await runAction()
+
+    expect(repo().state.statuses.map(s => s.state)).toEqual([
+      'failure',
+      'success'
+    ])
+  })
+
   it('fails without head-sha outside comment events', async () => {
     setContext({
       issueNumber: 7,

@@ -21,7 +21,22 @@ const MAX_ATTEMPTS = 3
  * Without it, the pull request is the one the comment was made on.
  */
 export async function runWithStatus(statusContext: string): Promise<void> {
-  const found = await loadPullRequest()
+  let found
+  try {
+    found = await loadPullRequest()
+  } catch (error) {
+    // The requested head is known before the lookup, so a failed lookup can still report on it.
+    const headSha = input.getHeadSha()
+    if (headSha) {
+      await postStatus(
+        statusContext,
+        headSha,
+        'error',
+        'The CLA check could not complete'
+      )
+    }
+    throw error
+  }
   if (!found) return
   const { pr, sharing } = found
   const headSha: string = pr.head.sha
@@ -53,7 +68,8 @@ export async function runWithStatus(statusContext: string): Promise<void> {
     const settled =
       state === 'success' ||
       attempt === MAX_ATTEMPTS ||
-      (await signaturesVersion()) === signaturesBefore
+      (signaturesBefore !== undefined &&
+        (await signaturesVersion()) === signaturesBefore)
     if (settled) {
       // The status carries an unsigned result; failing the job too would mark
       // the default branch's commit red. Errors still fail the job.
@@ -98,6 +114,7 @@ async function postStatus(
   })
 }
 
+/** The signatures file's blob SHA, or undefined when it cannot be read, which counts as changed. */
 async function signaturesVersion(): Promise<string | undefined> {
   try {
     return (await getFileContent())?.data?.sha

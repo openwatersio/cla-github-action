@@ -33507,7 +33507,18 @@ const MAX_ATTEMPTS = 3;
  */
 function runWithStatus(statusContext) {
     return __awaiter(this, void 0, void 0, function* () {
-        const found = yield loadPullRequest();
+        let found;
+        try {
+            found = yield loadPullRequest();
+        }
+        catch (error) {
+            // The requested head is known before the lookup, so a failed lookup can still report on it.
+            const headSha = input.getHeadSha();
+            if (headSha) {
+                yield postStatus(statusContext, headSha, 'error', 'The CLA check could not complete');
+            }
+            throw error;
+        }
         if (!found)
             return;
         const { pr, sharing } = found;
@@ -33530,7 +33541,8 @@ function runWithStatus(statusContext) {
             // Check again against the newer file.
             const settled = state === 'success' ||
                 attempt === MAX_ATTEMPTS ||
-                (yield signaturesVersion()) === signaturesBefore;
+                (signaturesBefore !== undefined &&
+                    (yield signaturesVersion()) === signaturesBefore);
             if (settled) {
                 // The status carries an unsigned result; failing the job too would mark
                 // the default branch's commit red. Errors still fail the job.
@@ -33567,6 +33579,7 @@ function postStatus(statusContext, sha, state, description) {
         })));
     });
 }
+/** The signatures file's blob SHA, or undefined when it cannot be read, which counts as changed. */
 function signaturesVersion() {
     return __awaiter(this, void 0, void 0, function* () {
         var _a, _b;
