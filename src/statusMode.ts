@@ -3,7 +3,7 @@ import { context } from '@actions/github'
 import { octokit } from './octokit'
 import { getFileContent } from './persistence/persistence'
 import { setupClaCheck } from './setupClaCheck'
-import { errorMessage } from './shared/errors'
+import { errorMessage, errorStatus } from './shared/errors'
 import * as input from './shared/getInputs'
 
 type PullRequest = NonNullable<typeof context.payload.pull_request>
@@ -33,6 +33,10 @@ export async function runWithStatus(statusContext: string): Promise<void> {
         headSha,
         'error',
         'The CLA check could not complete'
+      ).catch(statusError =>
+        core.warning(
+          `Could not post the error status: ${errorMessage(statusError)}`
+        )
       )
     }
     throw error
@@ -65,11 +69,15 @@ export async function runWithStatus(statusContext: string): Promise<void> {
     // stale: a signing run that wrote after this check read the file may have
     // posted its success first, and a concurrent write rejects this run's own.
     // Check again against the newer file.
+    const signaturesAfter = await signaturesVersion()
+    // An unreadable version may hide a signature, so an unsigned result checks
+    // again; an error has already failed closed and would only repeat.
+    const unknown =
+      signaturesBefore === undefined || signaturesAfter === undefined
     const settled =
       state === 'success' ||
       attempt === MAX_ATTEMPTS ||
-      (signaturesBefore !== undefined &&
-        (await signaturesVersion()) === signaturesBefore)
+      (unknown ? state === 'error' : signaturesAfter === signaturesBefore)
     if (settled) {
       // The status carries an unsigned result; failing the job too would mark
       // the default branch's commit red. Errors still fail the job.
@@ -114,12 +122,12 @@ async function postStatus(
   })
 }
 
-/** The signatures file's blob SHA, or undefined when it cannot be read, which counts as changed. */
+/** The signatures file's blob SHA, `missing` before it exists, or undefined when it cannot be read. */
 async function signaturesVersion(): Promise<string | undefined> {
   try {
     return (await getFileContent())?.data?.sha
-  } catch {
-    return undefined
+  } catch (error) {
+    return errorStatus(error) === 404 ? 'missing' : undefined
   }
 }
 

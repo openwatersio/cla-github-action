@@ -33515,7 +33515,7 @@ function runWithStatus(statusContext) {
             // The requested head is known before the lookup, so a failed lookup can still report on it.
             const headSha = input.getHeadSha();
             if (headSha) {
-                yield postStatus(statusContext, headSha, 'error', 'The CLA check could not complete');
+                yield postStatus(statusContext, headSha, 'error', 'The CLA check could not complete').catch(statusError => core.warning(`Could not post the error status: ${(0, errors_1.errorMessage)(statusError)}`));
             }
             throw error;
         }
@@ -33539,10 +33539,13 @@ function runWithStatus(statusContext) {
             // stale: a signing run that wrote after this check read the file may have
             // posted its success first, and a concurrent write rejects this run's own.
             // Check again against the newer file.
+            const signaturesAfter = yield signaturesVersion();
+            // An unreadable version may hide a signature, so an unsigned result checks
+            // again; an error has already failed closed and would only repeat.
+            const unknown = signaturesBefore === undefined || signaturesAfter === undefined;
             const settled = state === 'success' ||
                 attempt === MAX_ATTEMPTS ||
-                (signaturesBefore !== undefined &&
-                    (yield signaturesVersion()) === signaturesBefore);
+                (unknown ? state === 'error' : signaturesAfter === signaturesBefore);
             if (settled) {
                 // The status carries an unsigned result; failing the job too would mark
                 // the default branch's commit red. Errors still fail the job.
@@ -33579,15 +33582,15 @@ function postStatus(statusContext, sha, state, description) {
         })));
     });
 }
-/** The signatures file's blob SHA, or undefined when it cannot be read, which counts as changed. */
+/** The signatures file's blob SHA, `missing` before it exists, or undefined when it cannot be read. */
 function signaturesVersion() {
     return __awaiter(this, void 0, void 0, function* () {
         var _a, _b;
         try {
             return (_b = (_a = (yield (0, persistence_1.getFileContent)())) === null || _a === void 0 ? void 0 : _a.data) === null || _b === void 0 ? void 0 : _b.sha;
         }
-        catch (_c) {
-            return undefined;
+        catch (error) {
+            return (0, errors_1.errorStatus)(error) === 404 ? 'missing' : undefined;
         }
     });
 }

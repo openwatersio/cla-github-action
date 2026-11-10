@@ -274,6 +274,35 @@ describe('status mode', () => {
     ])
   })
 
+  it('stops after one pass when the signatures file cannot be read at all', async () => {
+    fake.injectFailure({
+      method: 'GET',
+      pathPattern: /\/contents\//,
+      status: 403,
+      times: 100
+    })
+    workflowRun('headsha')
+    await runAction()
+
+    expect(repo().state.statuses).toEqual([
+      { sha: 'headsha', state: 'error', context: 'cla' }
+    ])
+  })
+
+  it('reports an unsigned failure after creating a missing signatures file', async () => {
+    repo().state.files.delete('signatures/cla.json')
+    workflowRun('headsha')
+    await runAction()
+
+    expect(repo().state.statuses.map(s => s.state)).toEqual([
+      'error',
+      'failure'
+    ])
+    expect(repo().getFile('signatures/cla.json')).toEqual({
+      signedContributors: []
+    })
+  })
+
   it('fails without head-sha outside comment events', async () => {
     setContext({
       issueNumber: 7,
